@@ -1,80 +1,322 @@
-const nodemailer = require("nodemailer");
-const admin = require("firebase-admin");
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Facebeek</title>
+    <style>
+        :root {
+            --bg: #f2f2f7; --surface: #ffffff; --primary: #007aff; --text: #1c1c1e; 
+            --text-dim: #8e8e93; --divider: #e5e5ea; --danger: #ff3b30; --input-bg: #e5e5ea;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Roboto, sans-serif; -webkit-tap-highlight-color: transparent; }
+        body { background: var(--bg); color: var(--text); height: 100dvh; overflow: hidden; }
+        
+        /* --- Экраны и Анимации --- */
+        .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: var(--bg); display: flex; flex-direction: column; opacity: 0; pointer-events: none; transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94); transform: translateX(40px); z-index: 1; }
+        .screen.active { opacity: 1; pointer-events: auto; transform: translateX(0); z-index: 2; }
+        .screen.auth-bg { background: var(--surface); justify-content: center; padding: 24px; transform: scale(0.95); }
+        .screen.auth-bg.active { transform: scale(1); }
 
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
-    }),
-  });
-}
+        /* --- Навигация --- */
+        .bottom-nav { position: absolute; bottom: 0; left: 0; right: 0; height: 80px; background: var(--surface); border-top: 0.5px solid var(--divider); display: none; justify-content: space-around; align-items: flex-start; padding-top: 10px; z-index: 100; }
+        .nav-btn { background: none; border: none; color: var(--text-dim); font-size: 10px; display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; transition: color 0.2s; width: 60px; }
+        .nav-btn.active { color: var(--primary); }
+        .nav-btn svg { width: 28px; height: 28px; fill: currentColor; }
 
-const db = admin.firestore();
-const transporter = nodemailer.createTransport({
-  service: "Mail.ru",
-  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-});
+        /* --- UI Элементы --- */
+        .header { padding: 16px 20px 10px; font-size: 34px; font-weight: 800; background: var(--bg); }
+        .search-box { padding: 0 16px 12px; background: var(--bg); }
+        input { width: 100%; padding: 14px 16px; border-radius: 12px; border: none; background: var(--input-bg); color: var(--text); font-size: 16px; outline: none; transition: box-shadow 0.2s; }
+        input:focus { box-shadow: 0 0 0 2px var(--primary); background: #fff; }
+        input::placeholder { color: var(--text-dim); }
+        
+        /* --- Списки --- */
+        .list-container { flex: 1; overflow-y: auto; padding: 0 16px; -webkit-overflow-scrolling: touch; }
+        .list-item { display: flex; align-items: center; padding: 12px 0; border-bottom: 0.5px solid var(--divider); }
+        .avatar { width: 50px; height: 50px; border-radius: 50%; margin-right: 14px; flex-shrink: 0; color: white; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px; box-shadow: 0 2px 6px rgba(0,0,0,0.1); }
+        .item-info h3 { font-size: 16px; font-weight: 600; }
+        .item-info p { font-size: 14px; color: var(--text-dim); margin-top: 2px; }
 
-const codes = new Map();
+        /* --- Формы и Кнопки --- */
+        .logo { font-size: 48px; font-weight: 800; text-align: center; margin-bottom: 40px; color: var(--primary); letter-spacing: -1px; }
+        .form-group { margin-bottom: 16px; }
+        .form-group label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; padding-left: 4px; }
+        .error-msg { color: var(--danger); font-size: 13px; text-align: center; margin-bottom: 10px; display: none; background: rgba(255,59,48,0.1); padding: 10px; border-radius: 8px; }
+        .btn { width: 100%; padding: 16px; border-radius: 14px; border: none; background: var(--primary); color: white; font-size: 17px; font-weight: 600; cursor: pointer; transition: transform 0.15s, opacity 0.2s; }
+        .btn:active { transform: scale(0.97); opacity: 0.8; }
+        .btn-outline { background: transparent; color: var(--primary); border: 1.5px solid var(--primary); margin-top: 12px; }
+        .btn-danger { background: transparent; color: var(--danger); border: 1.5px solid var(--danger); margin-top: 30px; }
+        .btn-text { background: none; border: none; color: var(--primary); font-weight: 600; font-size: 15px; cursor: pointer; margin-top: 20px; display: block; width: 100%; text-align: center; }
+        
+        /* --- Профиль --- */
+        .profile-avatar { width: 100px; height: 100px; border-radius: 50%; margin: 30px auto 20px; display: flex; color: white; font-size: 40px; font-weight: 700; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,122,255,0.3); }
+        .profile-info { text-align: center; margin-bottom: 30px; }
+        .profile-info h2 { font-size: 24px; font-weight: 700; }
+        .profile-info p { color: var(--text-dim); font-size: 16px; margin-top: 4px; }
 
-module.exports = async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") return res.status(200).end();
-  if (req.method !== "POST") return res.status(405).send("Method not allowed");
+        /* --- Заглушка --- */
+        .empty-state { text-align: center; color: var(--text-dim); margin-top: 60px; padding: 0 20px; line-height: 1.5; }
+    </style>
+</head>
+<body>
 
-  const { action, email, password, nickname, username, code } = req.body;
+    <!-- ЭКРАН АВТОРИЗАЦИИ -->
+    <div id="authScreen" class="screen auth-bg active">
+        <div class="logo">Facebeek</div>
+        
+        <!-- Форма Регистрации -->
+        <div id="regForm">
+            <div id="regError" class="error-msg"></div>
+            <div class="form-group"><label>Электронная почта</label><input type="email" id="regEmail" placeholder="mail@example.com"></div>
+            <div class="form-group"><label>Никнейм</label><input type="text" id="regNickname" placeholder="Иван Иванов"></div>
+            <div class="form-group"><label>Юзернейм (5-20 англ. букв)</label><input type="text" id="regUsername" placeholder="coolboy2000" autocomplete="off"></div>
+            <div class="form-group"><label>Пароль (мин. 6 символов)</label><input type="password" id="regPassword"></div>
+            <button class="btn" onclick="sendCode()">Зарегистрироваться</button>
+            <button class="btn-text" onclick="showLogin()">Уже есть аккаунт</button>
+        </div>
 
-  try {
-    // --- РЕГИСТРАЦИЯ (Отправка кода) ---
-    if (action === "register_send_code") {
-      if (!username || !/^[a-zA-Z]{5,20}$/.test(username)) return res.status(400).json({ error: "Юзернейм: 5-20 английских букв" });
-      const usernameSnapshot = await db.collection("users").where("username", "==", username.toLowerCase()).get();
-      if (!usernameSnapshot.empty) return res.status(400).json({ error: "Этот юзернейм уже занят" });
+        <!-- Форма Ввода Кода -->
+        <div id="codeForm" style="display: none;">
+            <div id="codeError" class="error-msg"></div>
+            <p style="text-align:center; color:var(--text-dim); margin-bottom:24px; line-height: 1.5;">Мы отправили код на <b id="sentEmail" style="color:var(--text)"></b></p>
+            <input type="text" id="codeInput" placeholder="6-значный код" maxlength="6" inputmode="numeric" style="text-align: center; font-size: 28px; letter-spacing: 8px; margin-bottom: 24px; background: #fff;">
+            <button class="btn" onclick="verifyCode()">Подтвердить</button>
+            <button class="btn-text" onclick="cancelCode()" style="color:var(--danger)">Отмена</button>
+        </div>
 
-      const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
-      codes.set(email, { code: generatedCode, password, nickname, username: username.toLowerCase(), expires: Date.now() + 600000 });
+        <!-- Форма Входа -->
+        <div id="loginForm" style="display: none;">
+            <div id="loginError" class="error-msg"></div>
+            <div class="form-group"><label>Электронная почта</label><input type="email" id="loginEmail" placeholder="mail@example.com"></div>
+            <div class="form-group"><label>Пароль</label><input type="password" id="loginPassword"></div>
+            <button class="btn" onclick="loginUser()">Войти</button>
+            <button class="btn-text" onclick="showRegister()">Создать аккаунт</button>
+        </div>
+    </div>
 
-      await transporter.sendMail({
-        from: `"Facebeek" <${process.env.EMAIL_USER}>`,
-        to: email,
-        subject: "Твой код для Facebeek",
-        html: `<h1>Добро пожаловать!</h1><p>Твой код: <b style="font-size:24px">${generatedCode}</b></p>`,
-      });
-      return res.status(200).json({ success: true });
-    }
+    <!-- ЭКРАН ЛЮДИ -->
+    <div id="peopleScreen" class="screen" style="padding-bottom: 80px;">
+        <div class="header">Люди</div>
+        <div class="search-box"><input type="text" id="searchPeople" placeholder="Поиск по нику или юзернейму..." oninput="searchUsers()"></div>
+        <div class="list-container" id="peopleList">
+            <div class="empty-state">Начните вводить имя, чтобы найти людей</div>
+        </div>
+    </div>
 
-    // --- РЕГИСТРАЦИЯ (Проверка кода) ---
-    if (action === "register_verify") {
-      const storedData = codes.get(email);
-      if (!storedData) return res.status(400).json({ error: "Запроси код заново" });
-      if (storedData.code !== code) return res.status(400).json({ error: "Неверный код" });
-      if (Date.now() > storedData.expires) return res.status(400).json({ error: "Код просрочен" });
+    <!-- ЭКРАН КАНАЛЫ -->
+    <div id="channelsScreen" class="screen" style="padding-bottom: 80px;">
+        <div class="header">Каналы</div>
+        <div class="search-box"><input type="text" id="searchChannels" placeholder="Поиск по имени канала..." oninput="searchChannelsFn()"></div>
+        <div class="list-container" id="channelsList">
+            <div class="empty-state">Найдите канал или создайте свой</div>
+        </div>
+    </div>
 
-      const userRecord = await admin.auth().createUser({ email, password: storedData.password, displayName: storedData.nickname });
-      await db.collection("users").doc(userRecord.uid).set({ username: storedData.username, nickname: storedData.nickname, email });
-      codes.delete(email);
-      const customToken = await admin.auth().createCustomToken(userRecord.uid);
-      return res.status(200).json({ success: true, token: customToken });
-    }
+    <!-- ЭКРАН СОЗДАТЬ КАНАЛ -->
+    <div id="createScreen" class="screen" style="padding-bottom: 80px; justify-content: center; padding: 40px 24px;">
+        <div style="font-size: 34px; font-weight: 800; margin-bottom: 30px;">Новый канал</div>
+        <div id="channelError" class="error-msg"></div>
+        <div class="form-group"><label>Название канала (англ. буквы)</label><input type="text" id="channelName" placeholder="my_super_channel"></div>
+        <button class="btn" onclick="createChannel()">Создать</button>
+        <button class="btn-outline" onclick="switchScreen('channelsScreen')">Отмена</button>
+    </div>
 
-    // --- ВХОД (Без кода, просто по почте и паролю) ---
-    if (action === "login") {
-      try {
-        const userRecord = await admin.auth().getUserByEmail(email);
-        // Firebase Auth не позволяет проверять пароль на сервере напрямую безопасно
-        // Поэтому мы возвращаем клиенту сигнал, что можно попробовать войти через клиентский SDK
-        return res.status(200).json({ success: true, message: "Proceed to client login" });
-      } catch(e) {
-        return res.status(400).json({ error: "Неверная почта или пароль" });
-      }
-    }
+    <!-- ЭКРАН ПРОФИЛЬ -->
+    <div id="profileScreen" class="screen" style="padding-bottom: 80px;">
+        <div class="header">Профиль</div>
+        <div style="padding: 20px;">
+            <div class="profile-avatar" id="profileAvatarLetter" style="background: var(--primary);">?</div>
+            <div class="profile-info">
+                <h2 id="profileNick">Загрузка...</h2>
+                <p id="profileUser">@username</p>
+            </div>
+            <div class="form-group"><label>Изменить никнейм</label><input type="text" id="editNickname"></div>
+            <button class="btn" onclick="updateNickname()">Сохранить</button>
+            <button class="btn-danger" onclick="logOut()">Выйти из аккаунта</button>
+        </div>
+    </div>
 
-  } catch (error) {
-    if (error.code === "auth/email-already-exists") return res.status(400).json({ error: "Эта почта уже зарегистрирована." });
-    return res.status(500).json({ error: error.message });
-  }
-};
+    <!-- НИЖНЯЯ НАВИГАЦИЯ -->
+    <div class="bottom-nav" id="bottomNav">
+        <button class="nav-btn active" onclick="switchScreen('peopleScreen')">
+            <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>Люди
+        </button>
+        <button class="nav-btn" onclick="switchScreen('channelsScreen')">
+            <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>Каналы
+        </button>
+        <button class="nav-btn" onclick="switchScreen('createScreen')">
+            <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>Создать
+        </button>
+        <button class="nav-btn" onclick="switchScreen('profileScreen')">
+            <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>Профиль
+        </button>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, collection, addDoc, query, where, getDocs, updateDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+        // ВСТАВЬ СВОЙ КОНФИГ СЮДА!!!
+        const firebaseConfig = {
+            apiKey: "AIzaSy...",
+            authDomain: "твой-проект.firebaseapp.com",
+            projectId: "твой-проект",
+            storageBucket: "твой-проект.appspot.com",
+            messagingSenderId: "123456",
+            appId: "1:123:web:abc"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const colors = ['#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#007aff', '#5856d6', '#af52de', '#ff2d55'];
+        const getInitials = (name) => name ? name.charAt(0).toUpperCase() : '?';
+        const getColor = (name) => { let hash = 0; for (let i = 0; i < name.length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash); return colors[Math.abs(hash) % colors.length]; };
+
+        // Слушатель состояния (если вошел - кидает в приложение)
+        onAuthStateChanged(auth, user => {
+            if (user) {
+                document.getElementById('bottomNav').style.display = 'flex';
+                loadUserProfile(user.uid);
+                switchScreen('peopleScreen');
+            } else {
+                document.getElementById('bottomNav').style.display = 'none';
+                switchScreen('authScreen');
+            }
+        });
+
+        // --- ЛОГИКА АВТОРИЗАЦИИ ---
+        window.showLogin = () => { document.getElementById('regForm').style.display='none'; document.getElementById('codeForm').style.display='none'; document.getElementById('loginForm').style.display='block'; };
+        window.showRegister = () => { document.getElementById('loginForm').style.display='none'; document.getElementById('codeForm').style.display='none'; document.getElementById('regForm').style.display='block'; };
+        window.cancelCode = () => showRegister();
+
+        // Регистрация (Шаг 1)
+        window.sendCode = async function() {
+            const email = document.getElementById('regEmail').value;
+            const nickname = document.getElementById('regNickname').value;
+            const username = document.getElementById('regUsername').value;
+            const password = document.getElementById('regPassword').value;
+            const errDiv = document.getElementById('regError');
+
+            if (!email || !nickname || !username || !password) { errDiv.textContent = "Заполните все поля"; errDiv.style.display = 'block'; return; }
+            try {
+                const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'register_send_code', email, nickname, username, password }) });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                document.getElementById('regForm').style.display = 'none';
+                document.getElementById('codeForm').style.display = 'block';
+                document.getElementById('sentEmail').textContent = email;
+            } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; }
+        };
+
+        // Регистрация (Шаг 2 - Проверка кода)
+        window.verifyCode = async function() {
+            const email = document.getElementById('regEmail').value;
+            const code = document.getElementById('codeInput').value;
+            const errDiv = document.getElementById('codeError');
+            try {
+                const res = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'register_verify', email, code }) });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                await signInWithCustomToken(auth, data.token); // Входим!
+            } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; }
+        };
+
+        // Вход (По почте и паролю)
+        window.loginUser = async function() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            const errDiv = document.getElementById('loginError');
+            try {
+                await signInWithEmailAndPassword(auth, email, password);
+            } catch (e) { 
+                errDiv.textContent = "Неверная почта или пароль"; errDiv.style.display = 'block'; 
+            }
+        };
+
+        window.logOut = function() { signOut(auth); };
+
+        // --- ПРОФИЛЬ ---
+        async function loadUserProfile(uid) {
+            const docRef = doc(db, "users", uid);
+            const docSnap = await getDoc(docRef);
+            if (docSnap.exists()) {
+                const d = docSnap.data();
+                document.getElementById('profileNick').textContent = d.nickname;
+                document.getElementById('profileUser').textContent = `@${d.username}`;
+                document.getElementById('editNickname').value = d.nickname;
+                const avDiv = document.getElementById('profileAvatarLetter');
+                avDiv.textContent = getInitials(d.nickname);
+                avDiv.style.background = getColor(d.username);
+            }
+        }
+
+        window.updateNickname = async function() {
+            if (!auth.currentUser) return;
+            const newNick = document.getElementById('editNickname').value.trim();
+            if (!newNick) return;
+            await updateDoc(doc(db, "users", auth.currentUser.uid), { nickname: newNick });
+            document.getElementById('profileNick').textContent = newNick;
+            document.getElementById('profileAvatarLetter').textContent = getInitials(newNick);
+            alert('Никнейм обновлен!');
+        };
+
+        // --- ПОИСК ЛЮДЕЙ ---
+        window.searchUsers = async function() {
+            const str = document.getElementById('searchPeople').value.toLowerCase();
+            const list = document.getElementById('peopleList');
+            if (str.length < 2) { list.innerHTML = '<div class="empty-state">Введите минимум 2 символа</div>'; return; }
+            
+            const q1 = query(collection(db, "users"), where("username", ">=", str), where("username", "<=", str + '\uf8ff'));
+            const q2 = query(collection(db, "users"), where("nickname", ">=", str), where("nickname", "<=", str + '\uf8ff'));
+            const [s1, s2] = await Promise.all([getDocs(q1), getDocs(q2)]);
+            const map = new Map();
+            s1.forEach(d => { if(d.id !== auth.currentUser.uid) map.set(d.id, d.data()); });
+            s2.forEach(d => { if(d.id !== auth.currentUser.uid) map.set(d.id, d.data()); });
+
+            if (map.size === 0) { list.innerHTML = '<div class="empty-state">Никого не найдено</div>'; return; }
+            list.innerHTML = '';
+            map.forEach(data => {
+                list.innerHTML += `<div class="list-item"><div class="avatar" style="background:${getColor(data.username)}">${getInitials(data.nickname)}</div><div class="item-info"><h3>${data.nickname}</h3><p>@${data.username}</p></div></div>`;
+            });
+        };
+
+        // --- КАНАЛЫ ---
+        window.searchChannelsFn = async function() {
+            const str = document.getElementById('searchChannels').value.toLowerCase();
+            const list = document.getElementById('channelsList');
+            if (str.length < 2) { list.innerHTML = '<div class="empty-state">Введите минимум 2 символа</div>'; return; }
+            const q = query(collection(db, "channels"), where("name", ">=", str), where("name", "<=", str + '\uf8ff'));
+            const snap = await getDocs(q);
+            if (snap.empty) { list.innerHTML = '<div class="empty-state">Каналов не найдено</div>'; return; }
+            list.innerHTML = '';
+            snap.forEach(d => { const data = d.data(); list.innerHTML += `<div class="list-item"><div class="avatar" style="background:${getColor(data.name)}">${getInitials(data.name)}</div><div class="item-info"><h3>${data.name}</h3><p>Канал</p></div></div>`; });
+        };
+
+        window.createChannel = async function() {
+            const name = document.getElementById('channelName').value.trim().toLowerCase();
+            const errDiv = document.getElementById('channelError');
+            if (!name) { errDiv.textContent = "Введите название"; errDiv.style.display = 'block'; return; }
+            try {
+                await addDoc(collection(db, "channels"), { name, creatorId: auth.currentUser.uid });
+                document.getElementById('channelName').value = '';
+                document.getElementById('searchChannels').value = name;
+                switchScreen('channelsScreen');
+                searchChannelsFn();
+            } catch (e) { errDiv.textContent = e.message; errDiv.style.display = 'block'; }
+        };
+
+        // --- НАВИГАЦИЯ ---
+        window.switchScreen = function(screenId) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            const map = { 'peopleScreen': 0, 'channelsScreen': 1, 'createScreen': 2, 'profileScreen': 3 };
+            if (map[screenId] !== undefined) document.querySelectorAll('.nav-btn')[map[screenId]].classList.add('active');
+        };
+    </script>
+</body>
+</html>
