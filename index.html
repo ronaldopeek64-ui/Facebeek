@@ -1,0 +1,80 @@
+const nodemailer = require("nodemailer");
+const admin = require("firebase-admin");
+
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n"),
+    }),
+  });
+}
+
+const db = admin.firestore();
+const transporter = nodemailer.createTransport({
+  service: "Mail.ru",
+  auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
+});
+
+const codes = new Map();
+
+module.exports = async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).send("Method not allowed");
+
+  const { action, email, password, nickname, username, code } = req.body;
+
+  try {
+    // --- РЕГИСТРАЦИЯ (Отправка кода) ---
+    if (action === "register_send_code") {
+      if (!username || !/^[a-zA-Z]{5,20}$/.test(username)) return res.status(400).json({ error: "Юзернейм: 5-20 английских букв" });
+      const usernameSnapshot = await db.collection("users").where("username", "==", username.toLowerCase()).get();
+      if (!usernameSnapshot.empty) return res.status(400).json({ error: "Этот юзернейм уже занят" });
+
+      const generatedCode = Math.floor(100000 + Math.random() * 900000).toString();
+      codes.set(email, { code: generatedCode, password, nickname, username: username.toLowerCase(), expires: Date.now() + 600000 });
+
+      await transporter.sendMail({
+        from: `"Facebeek" <${process.env.EMAIL_USER}>`,
+        to: email,
+        subject: "Твой код для Facebeek",
+        html: `<h1>Добро пожаловать!</h1><p>Твой код: <b style="font-size:24px">${generatedCode}</b></p>`,
+      });
+      return res.status(200).json({ success: true });
+    }
+
+    // --- РЕГИСТРАЦИЯ (Проверка кода) ---
+    if (action === "register_verify") {
+      const storedData = codes.get(email);
+      if (!storedData) return res.status(400).json({ error: "Запроси код заново" });
+      if (storedData.code !== code) return res.status(400).json({ error: "Неверный код" });
+      if (Date.now() > storedData.expires) return res.status(400).json({ error: "Код просрочен" });
+
+      const userRecord = await admin.auth().createUser({ email, password: storedData.password, displayName: storedData.nickname });
+      await db.collection("users").doc(userRecord.uid).set({ username: storedData.username, nickname: storedData.nickname, email });
+      codes.delete(email);
+      const customToken = await admin.auth().createCustomToken(userRecord.uid);
+      return res.status(200).json({ success: true, token: customToken });
+    }
+
+    // --- ВХОД (Без кода, просто по почте и паролю) ---
+    if (action === "login") {
+      try {
+        const userRecord = await admin.auth().getUserByEmail(email);
+        // Firebase Auth не позволяет проверять пароль на сервере напрямую безопасно
+        // Поэтому мы возвращаем клиенту сигнал, что можно попробовать войти через клиентский SDK
+        return res.status(200).json({ success: true, message: "Proceed to client login" });
+      } catch(e) {
+        return res.status(400).json({ error: "Неверная почта или пароль" });
+      }
+    }
+
+  } catch (error) {
+    if (error.code === "auth/email-already-exists") return res.status(400).json({ error: "Эта почта уже зарегистрирована." });
+    return res.status(500).json({ error: error.message });
+  }
+};
